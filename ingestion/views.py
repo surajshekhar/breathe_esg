@@ -15,6 +15,10 @@ def health_check(request):
         "message": "Backend working"
     })
 
+
+def _error(message, status_code):
+    return Response({"error": {"message": message}}, status=status_code)
+
 @api_view(["GET"])
 def get_records(request):
     records = NormalizedEmissionRecord.objects.all()
@@ -35,7 +39,7 @@ def create_data_source(request):
         serializer.save()
         return Response(serializer.data, status=201)
 
-    return Response(serializer.errors, status=400)
+    return Response({"error": serializer.errors}, status=400)
 
 
 def _decode_bytes(data):
@@ -187,11 +191,11 @@ def _build_normalized(source, raw_record, row):
 def _handle_upload(request, source_type):
     uploaded_file = request.FILES.get("file")
     if not uploaded_file:
-        return Response({"error": "file required"}, status=400)
+        return _error("file required", 400)
 
     company_id = request.data.get("company")
     if not company_id:
-        return Response({"error": "company required"}, status=400)
+        return _error("company required", 400)
 
     source = DataSource.objects.create(
         company_id=company_id,
@@ -205,8 +209,9 @@ def _handle_upload(request, source_type):
     except Exception:
         source.status = "failed"
         source.save(update_fields=["status"])
-        return Response({"error": "could not read file"}, status=400)
+        return _error("could not read file", 400)
 
+    suspicious_rows = 0
     for row in rows:
         raw_record = RawRecord.objects.create(
             source=source,
@@ -214,6 +219,7 @@ def _handle_upload(request, source_type):
         )
         _, errors = _build_normalized(source, raw_record, row)
         if errors:
+            suspicious_rows += 1
             raw_record.ingestion_errors = "; ".join(errors)
             raw_record.save(update_fields=["ingestion_errors"])
 
@@ -223,6 +229,7 @@ def _handle_upload(request, source_type):
     return Response({
         "data_source_id": source.id,
         "rows": len(rows),
+        "suspicious_rows": suspicious_rows,
     }, status=201)
 
 
@@ -262,7 +269,7 @@ def approve_record(request, record_id):
     try:
         record = NormalizedEmissionRecord.objects.get(id=record_id)
     except NormalizedEmissionRecord.DoesNotExist:
-        return Response({"error": "not found"}, status=404)
+        return _error("not found", 404)
 
     _update_review(record, "approved")
     return Response({"status": "approved"})
@@ -273,7 +280,7 @@ def reject_record(request, record_id):
     try:
         record = NormalizedEmissionRecord.objects.get(id=record_id)
     except NormalizedEmissionRecord.DoesNotExist:
-        return Response({"error": "not found"}, status=404)
+        return _error("not found", 404)
 
     _update_review(record, "rejected")
     return Response({"status": "rejected"})
