@@ -1,0 +1,21 @@
+Plant_Code,Fuel_Type,Quantity_Liters,Invoice_Date,Vendor,Einheit,Werk_Code,Kraftstofftyp,Menge_Liter,Rechnungsdatum,Lieferant
+PLT-001,Diesel,1200,2026-01-05,Arden Fuel,L,PLT-001,Diesel,1200,2026-01-05,Arden Fuel
+PLT-002,Petrol,850,2026-01-12,North Oil,liters,PLT-002,Benzin,850,2026-01-12,North Oil
+PLT-003,Diesel,500,2026-01-18,Blue Ridge,L,PLT-003,Diesel,500,2026-01-18,Blue Ridge
+PLT-004,LPG,300,2026-01-22,Metro Gas,kg,PLT-004,Fluessiggas,300,2026-01-22,Metro Gas
+PLT-005,Diesel,,2026-01-24,Arden Fuel,L,PLT-005,Diesel,,2026-01-24,Arden Fuel
+PLT-006,Petrol,675,2026-01-28,North Oil,gal,PLT-006,Benzin,675,2026-01-28,North Oil
+PLT-007,Diesel,920,2026-02-03,Blue Ridge,L,PLT-007,Diesel,920,2026-02-03,Blue Ridge
+PLT-008,Biofuel,410,2026-02-08,Green Steps,litre,PLT-008,Biokraftstoff,410,2026-02-08,Green Steps
+PLT-009,Diesel,1000,2026-02-11,Arden Fuel,L,PLT-009,Diesel,1000,2026-02-11,Arden Fuel
+PLT-010,Petrol,540,2026-02-14,North Oil,L,PLT-010,Benzin,540,2026-02-14,North Oil
+PLT-011,Diesel,780,2026-02-18,Blue Ridge,L,PLT-011,Diesel,780,2026-02-18,Blue Ridge
+PLT-012,LPG,260,2026-02-21,Metro Gas,kg,PLT-012,Fluessiggas,260,2026-02-21,Metro Gas
+PLT-013,Diesel,950,2026-03-02,Arden Fuel,L,PLT-013,Diesel,950,2026-03-02,Arden Fuel
+PLT-014,Petrol,610,2026-03-05,North Oil,L,PLT-014,Benzin,610,2026-03-05,North Oil
+PLT-015,Diesel,880,2026-03-09,Blue Ridge,L,PLT-015,Diesel,880,2026-03-09,Blue Ridge
+PLT-016,Biofuel,430,2026-03-12,Green Steps,liters,PLT-016,Biokraftstoff,430,2026-03-12,Green Steps
+PLT-017,Diesel,0,2026-03-15,Arden Fuel,L,PLT-017,Diesel,0,2026-03-15,Arden Fuel
+PLT-018,Petrol,725,2026-03-18,North Oil,L,PLT-018,Benzin,725,2026-03-18,North Oil
+PLT-019,Diesel,610,2026-03-21,Blue Ridge,L,PLT-019,Diesel,610,2026-03-21,Blue Ridge
+PLT-020,LPG,280,2026-03-24,Metro Gas,kg,PLT-020,Fluessiggas,280,2026-03-24,Metro Gas

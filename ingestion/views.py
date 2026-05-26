@@ -1,10 +1,17 @@
 import csv
 import io
 
+from django.db import IntegrityError
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 
-from .models import DataSource, RawRecord, NormalizedEmissionRecord, AuditLog
+from .models import (
+    AuditLog,
+    Company,
+    DataSource,
+    NormalizedEmissionRecord,
+    RawRecord,
+)
 from .serializers import DataSourceSerializer, NormalizedEmissionRecordSerializer
 
 
@@ -194,15 +201,27 @@ def _handle_upload(request, source_type):
         return _error("file required", 400)
 
     company_id = request.data.get("company")
-    if not company_id:
-        return _error("company required", 400)
+    company = None
+    if company_id:
+        try:
+            company_id = int(company_id)
+        except (TypeError, ValueError):
+            return _error("company must be an integer", 400)
 
-    source = DataSource.objects.create(
-        company_id=company_id,
-        source_type=source_type,
-        file_name=uploaded_file.name,
-        status="uploaded",
-    )
+        company = Company.objects.filter(id=company_id).first()
+
+    if company is None:
+        company, _ = Company.objects.get_or_create(name="Default Company")
+
+    try:
+        source = DataSource.objects.create(
+            company=company,
+            source_type=source_type,
+            file_name=uploaded_file.name,
+            status="uploaded",
+        )
+    except IntegrityError:
+        return _error("could not create data source", 400)
 
     try:
         rows = _read_csv_rows(uploaded_file)
