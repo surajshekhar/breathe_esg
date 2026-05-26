@@ -4,7 +4,7 @@ import io
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 
-from .models import DataSource, RawRecord, NormalizedEmissionRecord
+from .models import DataSource, RawRecord, NormalizedEmissionRecord, AuditLog
 from .serializers import DataSourceSerializer, NormalizedEmissionRecordSerializer
 
 
@@ -103,6 +103,87 @@ def _read_csv_rows(uploaded_file):
     return out
 
 
+def _find_value(row, keys):
+    lowered = {str(k).strip().lower(): v for k, v in row.items()}
+    for key in keys:
+        if key in lowered and str(lowered[key]).strip() != "":
+            return str(lowered[key]).strip()
+    return ""
+
+
+def _parse_number(value):
+    if value == "":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _normalize_unit(unit):
+    unit = (unit or "").strip().lower()
+    unit_map = {
+        "kwh": "kwh",
+        "kilowatt-hour": "kwh",
+        "mwh": "mwh",
+        "megawatt-hour": "mwh",
+        "km": "km",
+        "kilometer": "km",
+        "kilometers": "km",
+        "mi": "mi",
+        "mile": "mi",
+        "miles": "mi",
+        "kg": "kg",
+        "kilogram": "kg",
+        "kilograms": "kg",
+        "ton": "ton",
+        "tons": "ton",
+        "tonne": "ton",
+        "tonnes": "ton",
+    }
+    return unit_map.get(unit, "")
+
+
+def _build_normalized(source, raw_record, row):
+    errors = []
+
+    quantity_text = _find_value(row, ["quantity", "qty", "amount", "value"])
+    unit_text = _find_value(row, ["unit", "uom"])
+
+    quantity = _parse_number(quantity_text)
+    if quantity is None:
+        errors.append("missing quantity")
+        quantity = 0.0
+
+    if quantity < 0:
+        errors.append("negative value")
+
+    normalized_unit = _normalize_unit(unit_text)
+    if normalized_unit == "":
+        errors.append("invalid unit")
+
+    status = "suspicious" if errors else "pending"
+
+    scope = _find_value(row, ["scope"]) or "unknown"
+    category = _find_value(row, ["category"]) or "general"
+    activity_type = _find_value(row, ["activity_type", "activity"]) or "unknown"
+
+    record = NormalizedEmissionRecord.objects.create(
+        company=source.company,
+        raw_record=raw_record,
+        scope=scope,
+        category=category,
+        activity_type=activity_type,
+        quantity=quantity,
+        original_unit=unit_text,
+        normalized_unit=normalized_unit,
+        co2e=quantity,
+        status=status,
+    )
+
+    return record, errors
+
+
 def _handle_upload(request, source_type):
     uploaded_file = request.FILES.get("file")
     if not uploaded_file:
@@ -127,12 +208,16 @@ def _handle_upload(request, source_type):
         return Response({"error": "could not read file"}, status=400)
 
     for row in rows:
-        RawRecord.objects.create(
+        raw_record = RawRecord.objects.create(
             source=source,
             raw_json=row,
         )
+        _, errors = _build_normalized(source, raw_record, row)
+        if errors:
+            raw_record.ingestion_errors = "; ".join(errors)
+            raw_record.save(update_fields=["ingestion_errors"])
 
-    source.status = "parsed"
+    source.status = "normalized"
     source.save(update_fields=["status"])
 
     return Response({
@@ -154,3 +239,41 @@ def upload_utility_csv(request):
 @api_view(["POST"])
 def upload_travel_csv(request):
     return _handle_upload(request, "travel")
+
+
+def _update_review(record, action):
+    if action == "approved":
+        record.status = "approved"
+        record.locked_for_audit = True
+        record.save(update_fields=["status", "locked_for_audit"])
+    elif action == "rejected":
+        record.status = "rejected"
+        record.locked_for_audit = True
+        record.save(update_fields=["status", "locked_for_audit"])
+
+    AuditLog.objects.create(
+        record=record,
+        action=action,
+    )
+
+
+@api_view(["POST"])
+def approve_record(request, record_id):
+    try:
+        record = NormalizedEmissionRecord.objects.get(id=record_id)
+    except NormalizedEmissionRecord.DoesNotExist:
+        return Response({"error": "not found"}, status=404)
+
+    _update_review(record, "approved")
+    return Response({"status": "approved"})
+
+
+@api_view(["POST"])
+def reject_record(request, record_id):
+    try:
+        record = NormalizedEmissionRecord.objects.get(id=record_id)
+    except NormalizedEmissionRecord.DoesNotExist:
+        return Response({"error": "not found"}, status=404)
+
+    _update_review(record, "rejected")
+    return Response({"status": "rejected"})
