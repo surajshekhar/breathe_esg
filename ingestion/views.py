@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 
 from django.db import IntegrityError
 from rest_framework.response import Response
@@ -28,7 +29,27 @@ def _error(message, status_code):
 
 @api_view(["GET"])
 def get_records(request):
-    records = NormalizedEmissionRecord.objects.all()
+    try:
+        limit = int(request.query_params.get("limit", 500))
+    except (TypeError, ValueError):
+        limit = 500
+    limit = max(1, min(limit, 2000))
+
+    data_source_id = request.query_params.get("data_source_id")
+    try:
+        data_source_id = int(data_source_id) if data_source_id else None
+    except (TypeError, ValueError):
+        return _error("data_source_id must be an integer", 400)
+
+    queryset = NormalizedEmissionRecord.objects.select_related(
+        "raw_record__source",
+        "company",
+    )
+
+    if data_source_id:
+        queryset = queryset.filter(raw_record__source_id=data_source_id)
+
+    records = queryset.order_by("-id")[:limit]
 
     serializer = NormalizedEmissionRecordSerializer(
         records,
@@ -138,12 +159,23 @@ def _normalize_unit(unit):
         "kilowatt-hour": "kwh",
         "mwh": "mwh",
         "megawatt-hour": "mwh",
+        "l": "l",
+        "liter": "l",
+        "liters": "l",
+        "litre": "l",
+        "litres": "l",
+        "gal": "gal",
+        "gallon": "gal",
+        "gallons": "gal",
         "km": "km",
         "kilometer": "km",
         "kilometers": "km",
         "mi": "mi",
         "mile": "mi",
         "miles": "mi",
+        "hr": "hr",
+        "hour": "hr",
+        "hours": "hr",
         "kg": "kg",
         "kilogram": "kg",
         "kilograms": "kg",
@@ -155,11 +187,97 @@ def _normalize_unit(unit):
     return unit_map.get(unit, "")
 
 
-def _build_normalized(source, raw_record, row):
+def _parse_sap_row(row):
+    quantity_text = _find_value(
+        row,
+        [
+            "quantity_liters",
+            "menge_liter",
+            "menge",
+            "quantity",
+            "qty",
+            "amount",
+            "value",
+        ],
+    )
+    unit_text = _find_value(row, ["einheit", "unit", "uom", "quantity_unit"])
+    if unit_text == "" and quantity_text != "":
+        unit_text = "liter"
+
+    activity_type = _find_value(
+        row,
+        ["fuel_type", "kraftstofftyp", "fuel"],
+    )
+    if activity_type == "":
+        activity_type = "fuel"
+
+    return {
+        "quantity_text": quantity_text,
+        "unit_text": unit_text,
+        "scope": "scope_1",
+        "category": "fuel",
+        "activity_type": activity_type,
+    }
+
+
+def _parse_utility_row(row):
+    quantity_text = _find_value(
+        row,
+        ["kwh_used", "kwh", "quantity", "amount", "value"],
+    )
+    return {
+        "quantity_text": quantity_text,
+        "unit_text": "kwh",
+        "scope": "scope_2",
+        "category": "electricity",
+        "activity_type": "utility",
+        "billing_period": _find_value(row, ["billing_period", "period"]),
+    }
+
+
+def _parse_travel_row(row):
+    quantity_text = _find_value(
+        row,
+        ["flight_duration", "duration", "hours"],
+    )
+    return {
+        "quantity_text": quantity_text,
+        "unit_text": "hour",
+        "scope": "scope_3",
+        "category": "travel",
+        "activity_type": _find_value(row, ["travel_category", "category"])
+        or "unknown",
+        "from_airport": _find_value(row, ["from_airport", "from"]),
+        "to_airport": _find_value(row, ["to_airport", "to"]),
+    }
+
+
+def _is_normal_billing_period(value):
+    if value == "":
+        return True
+    return bool(re.match(r"^\d{4}[-/]\d{2}$", value))
+
+
+def _build_normalized(source, raw_record, row, source_type):
     errors = []
 
-    quantity_text = _find_value(row, ["quantity", "qty", "amount", "value"])
-    unit_text = _find_value(row, ["unit", "uom"])
+    if source_type == "sap":
+        parsed = _parse_sap_row(row)
+    elif source_type == "utility":
+        parsed = _parse_utility_row(row)
+    elif source_type == "travel":
+        parsed = _parse_travel_row(row)
+    else:
+        parsed = {
+            "quantity_text": _find_value(row, ["quantity", "qty", "amount", "value"]),
+            "unit_text": _find_value(row, ["unit", "uom"]),
+            "scope": _find_value(row, ["scope"]) or "unknown",
+            "category": _find_value(row, ["category"]) or "general",
+            "activity_type": _find_value(row, ["activity_type", "activity"]) or "unknown",
+        }
+
+    quantity_text = parsed.get("quantity_text", "")
+    unit_text = parsed.get("unit_text", "")
 
     quantity = _parse_number(quantity_text)
     if quantity is None:
@@ -173,23 +291,36 @@ def _build_normalized(source, raw_record, row):
     if normalized_unit == "":
         errors.append("invalid unit")
 
-    status = "suspicious" if errors else "pending"
+    if source_type == "utility":
+        billing_period = parsed.get("billing_period", "")
+        if billing_period and not _is_normal_billing_period(billing_period):
+            errors.append("weird billing period")
 
-    scope = _find_value(row, ["scope"]) or "unknown"
-    category = _find_value(row, ["category"]) or "general"
-    activity_type = _find_value(row, ["activity_type", "activity"]) or "unknown"
+    if source_type == "travel":
+        from_airport = parsed.get("from_airport", "")
+        to_airport = parsed.get("to_airport", "")
+        if from_airport == "" or to_airport == "":
+            errors.append("missing airport code")
+
+        allowed_categories = {"business", "economy", "premium", "first"}
+        travel_category = parsed.get("activity_type", "").lower()
+        if travel_category not in allowed_categories:
+            errors.append("unknown travel category")
+
+    status = "suspicious" if errors else "pending"
 
     record = NormalizedEmissionRecord.objects.create(
         company=source.company,
         raw_record=raw_record,
-        scope=scope,
-        category=category,
-        activity_type=activity_type,
+        scope=parsed.get("scope", "unknown"),
+        category=parsed.get("category", "general"),
+        activity_type=parsed.get("activity_type", "unknown"),
         quantity=quantity,
         original_unit=unit_text,
         normalized_unit=normalized_unit,
         co2e=quantity,
         status=status,
+        suspicious_reason="; ".join(errors) if errors else "",
     )
 
     return record, errors
@@ -236,7 +367,7 @@ def _handle_upload(request, source_type):
             source=source,
             raw_json=row,
         )
-        _, errors = _build_normalized(source, raw_record, row)
+        _, errors = _build_normalized(source, raw_record, row, source_type)
         if errors:
             suspicious_rows += 1
             raw_record.ingestion_errors = "; ".join(errors)

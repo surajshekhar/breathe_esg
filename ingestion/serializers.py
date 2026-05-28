@@ -21,6 +21,13 @@ class RawRecordSerializer(serializers.ModelSerializer):
 
 
 class NormalizedEmissionRecordSerializer(serializers.ModelSerializer):
+    source_type = serializers.SerializerMethodField()
+
     class Meta:
         model = NormalizedEmissionRecord
         fields = "__all__"
+
+    def get_source_type(self, obj):
+        if obj.raw_record_id is None:
+            return ""
+        return obj.raw_record.source.source_type

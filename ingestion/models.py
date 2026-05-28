@@ -1,12 +1,10 @@
 from django.db import models
 
-
 class Company(models.Model):
     name = models.CharField(max_length=255)
 
     def __str__(self):
         return self.name
-
 
 class DataSource(models.Model):
     SOURCE_TYPES = [
@@ -23,7 +21,6 @@ class DataSource(models.Model):
     status = models.CharField(max_length=50, default="uploaded")
 
     uploaded_at = models.DateTimeField(auto_now_add=True)
-
 
 class RawRecord(models.Model):
     source = models.ForeignKey(DataSource, on_delete=models.CASCADE)
@@ -82,6 +79,8 @@ class NormalizedEmissionRecord(models.Model):
 
     co2e = models.FloatField()
 
+    suspicious_reason = models.TextField(blank=True, null=True)
+
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -102,3 +101,4 @@ class AuditLog(models.Model):
     action = models.CharField(max_length=100)
 
     timestamp = models.DateTimeField(auto_now_add=True)
+
