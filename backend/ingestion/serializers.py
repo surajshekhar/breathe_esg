@@ -1,3 +1,4 @@
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 from .models import *
 
@@ -30,4 +31,7 @@ class NormalizedEmissionRecordSerializer(serializers.ModelSerializer):
     def get_source_type(self, obj):
         if obj.raw_record_id is None:
             return ""
-        return obj.raw_record.source.source_type
+        try:
+            return obj.raw_record.source.source_type
+        except ObjectDoesNotExist:
+            return ""
